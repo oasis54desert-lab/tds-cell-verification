@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TDS Cell Verification System V2</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f5f6f8;color:#17202a}
+.wrap{max-width:1200px;margin:auto;padding:18px}.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+button{padding:10px 14px;border:1px solid #ccd2d8;border-radius:8px;background:white;cursor:pointer}
+button.active,button.primary{background:#17202a;color:white}
+.card{background:white;border:1px solid #dde1e5;border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.formgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.num{font-size:24px;font-weight:700}.muted{color:#66717d;font-size:13px}.table{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e0e4e8;border-radius:10px;margin-top:12px}.table table{margin:0}
+table{width:100%;border-collapse:collapse;min-width:800px}th,td{padding:9px;border-bottom:1px solid #e4e7ea;text-align:left;font-size:13px}th{background:#f1f3f5}
+.pass{color:#16733b;font-weight:bold}.under{color:#b42318;font-weight:bold}.over{color:#9a6700;font-weight:bold}
+input,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccd2d8;border-radius:8px;font-size:15px}
+.hidden{display:none}
+.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.pan-count{font-weight:700;background:#f1f3f5;border-radius:999px;padding:7px 11px;white-space:nowrap}
+.pan-list{display:grid;gap:12px;margin-top:14px}
+.pan-card{border:1px solid #dde1e5;border-radius:12px;background:#fff;padding:14px}
+.pan-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.pan-title{font-size:18px;font-weight:700;letter-spacing:.3px}
+.pan-toggle{background:#17202a;color:#fff;border-color:#17202a}
+.pan-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.pan-summary div{background:#f7f8fa;border-radius:9px;padding:10px}
+.pan-summary span{display:block;color:#66717d;font-size:12px;margin-bottom:4px}
+.pan-summary strong{font-size:15px}
+.pan-meta{font-size:13px;line-height:1.7;margin-top:10px;color:#3f4850}
+.pan-details{margin-top:12px}
+.ok{background:#edf8f1}.testfail{background:#fdecec}.warn{background:#fff7e6}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:500px){.grid,.formgrid{grid-template-columns:1fr}.pan-summary{grid-template-columns:repeat(2,1fr)}.pan-head{align-items:flex-start}.pan-toggle{padding:8px 10px;font-size:12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>TDS Cell Verification System V2</h1>
+<p class="muted">Prototype: Customer-ID level TDS verification with PAN-level repository.</p>
+<div class="nav">
+<button class="active" data-tab="dash">Dashboard</button>
+<button data-tab="upload">Monthly File</button>
+<button data-tab="verify">Verification</button>
+<button data-tab="exceptions">Exceptions</button>
+<button data-tab="pan">PAN Repository</button>
+<button data-tab="codes">Tax Code Master</button><button data-tab="tests">Test Centre</button>
+</div>
+<section id="dash"></section><section id="upload" class="hidden"></section><section id="verify" class="hidden"></section>
+<section id="exceptions" class="hidden"></section><section id="pan" class="hidden"></section><section id="codes" class="hidden"></section><section id="tests" class="hidden"></section>
+</div>
+<script>
+const state={
+month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",
+rules:[
+{code:"TDSI",desc:"Citizen below 60 years",threshold:50000,rate:10},
+{code:"TDSRP",desc:"Senior Citizen",threshold:100000,rate:10},
+{code:"NOTDS",desc:"Nil TDS",threshold:null,rate:0},
+{code:"TDSN",desc:"NRE",threshold:null,rate:32},
+{code:"TD15G",desc:"15G rule",threshold:250000,rate:10},
+{code:"TD15H",desc:"15H rule",threshold:550000,rate:10}],
+records:[
+["CUST001","ABCDE1234F","TDSI",45000,0],["CUST002","FGHIJ5678K","TDSI",75000,7500],
+["CUST003","LMNOP9012Q","TDSI",90000,8000],["CUST004","ABCDE1234F","TDSRP",85000,0],
+["CUST005","RSTUV3456L","TDSRP",125000,12500],["CUST006","WXYZA7890M","TDSRP",150000,10000],
+["CUST007","BCDEF2345N","NOTDS",50000,0],["CUST008","CDEFG6789P","NOTDS",250000,0],
+["CUST009","DEFGH1234R","TDSN",100000,32000],["CUST010","EFGHI5678S","TDSN",250000,80000],
+["CUST011","FGHIJ9012T","TD15G",200000,0],["CUST012","GHIJK3456U","TD15G",250000,0],
+["CUST013","HIJKL7890V","TD15G",300000,30000],["CUST014","IJKLM2345W","TD15H",500000,0],
+["CUST015","JKLMN6789X","TD15H",550000,0],["CUST016","KLMNO1234Y","TD15H",600000,60000],
+["CUST017","ABCDE1234F","TDSI",60000,6000],["CUST018","ABCDE1234F","TDSI",40000,0],
+["CUST019","ABCDE1234F","TDSI",25000,0],["CUST020","ABCDE1234F","TDSRP",120000,12000],
+["CUST021","NEG0012345","TDSI",-10000,0]
+]};
+function rule(c){return state.rules.find(x=>x.code===c)}
+function expected(r){let x=rule(r[2]);if(!x)return null;let interest=r[3];if(interest<=0)return 0;if(x.rate===0)return 0;if(x.threshold===null)return interest*x.rate/100;return interest>x.threshold?interest*x.rate/100:0}
+function calc(){return state.records.map(r=>{let e=expected(r),d=r[4]-e;return{r,e,d,status:Math.abs(d)<.005?"PASS":d<0?"UNDER":"OVER"}})}
+function money(x){return "₹"+Number(x).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function table(a){
+ return `<div class="table"><table>
+ <thead><tr><th>Customer ID</th><th>PAN</th><th>Tax Code</th><th>Interest</th><th>Expected TDS</th><th>System TDS</th><th>Difference</th><th>Result</th></tr></thead>
+ <tbody>${a.map(x=>`<tr><td>${x.r[0]}</td><td>${x.r[1]}</td><td>${x.r[2]}</td><td>${money(x.r[3])}</td><td>${money(x.e)}</td><td>${money(x.r[4])}</td><td>${money(Math.abs(x.d))}</td><td class="${x.status.toLowerCase()}">${x.status}</td></tr>`).join("")}</tbody>
+ </table></div>`;
+}
+function renderTests(){
+ const cases=[
+  ["TDSI threshold", "TDSI", 50000, 0],
+  ["TDSI above", "TDSI", 50001, 5000.10],
+  ["TDSRP threshold", "TDSRP", 100000, 0],
+  ["TDSRP above", "TDSRP", 100001, 10000.10],
+  ["NOTDS", "NOTDS", 500000, 0],
+  ["TDSN", "TDSN", 100000, 32000],
+  ["TD15G threshold", "TD15G", 250000, 0],
+  ["TD15G above", "TD15G", 250001, 25000.10],
+  ["TD15H threshold", "TD15H", 550000, 0],
+  ["TD15H above", "TD15H", 550001, 55000.10],
+  ["Negative interest", "TDSI", -10000, 0]
+ ];
+ const rows=cases.map(c=>{
+   const r=["TEST","TESTPAN",c[1],c[2],0];
+   const engine=expected(r);
+   const pass=Math.abs(engine-c[3])<0.005;
+   return `<tr><td>${c[0]}</td><td>${c[1]}</td><td>${money(c[2])}</td><td>${money(c[3])}</td><td>${money(engine)}</td><td class="${pass?"pass":"under"}">${pass?"PASS":"FAIL"}</td></tr>`;
+ }).join("");
+ document.getElementById("tests").innerHTML=`<div class="card"><b>Test Centre</b><p class="muted">Automated boundary and regression tests for the current tax-code rules.</p><button class="primary" id="runTests">Run Tests</button><span id="testSummary" class="muted" style="margin-left:10px"></span><div class="table"><table><thead><tr><th>Test</th><th>Tax Code</th><th>Interest</th><th>Expected</th><th>Engine</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+ document.getElementById("runTests").onclick=()=>{const total=cases.length;const pass=cases.filter(c=>Math.abs(expected(["TEST","TESTPAN",c[1],c[2],0])-c[3])<0.005).length;document.getElementById("testSummary").textContent=pass+" / "+total+" tests passed.";};
+}
+function render(){
+ let a=calc(), interest=a.reduce((s,x)=>s+x.r[3],0),exp=a.reduce((s,x)=>s+x.e,0),act=a.reduce((s,x)=>s+x.r[4],0);
+ document.getElementById("dash").innerHTML=`<div class="grid">
+ <div class="card"><div class="muted">Records</div><div class="num">${a.length}</div></div>
+ <div class="card"><div class="muted">Net interest</div><div class="num">${money(interest)}</div></div>
+ <div class="card"><div class="muted">Expected TDS</div><div class="num">${money(exp)}</div></div>
+ <div class="card"><div class="muted">System TDS</div><div class="num">${money(act)}</div></div></div>
+ <div class="grid"><div class="card ok"><div class="muted">PASS</div><div class="num">${a.filter(x=>x.status==="PASS").length}</div></div>
+ <div class="card warn"><div class="muted">UNDER</div><div class="num">${a.filter(x=>x.status==="UNDER").length}</div></div>
+ <div class="card warn"><div class="muted">OVER</div><div class="num">${a.filter(x=>x.status==="OVER").length}</div></div>
+ <div class="card"><div class="muted">Batch</div><div class="num" style="font-size:18px">${state.batch}</div></div></div>
+ <div class="card"><b>V2 scope</b><p class="muted">Customer ID is the primary verification key. PAN is retained for consolidation and may contain multiple Customer IDs and multiple tax codes.</p></div>`;
+ document.getElementById("verify").innerHTML=`<div class="card"><b>Customer ID Verification</b><div class="table">${table(a)}</div></div>`;
+ document.getElementById("exceptions").innerHTML=`<div class="card"><b>Exceptions</b><div class="table">${table(a.filter(x=>x.status!=="PASS"))}</div></div>`;
+ let pm={};
+ a.forEach(x=>{
+   let p=x.r[1];
+   if(!pm[p]) pm[p]={ids:[],i:0,e:0,s:0,codes:{}};
+   if(!pm[p].ids.includes(x.r[0])) pm[p].ids.push(x.r[0]);
+   if(!pm[p].codes[x.r[2]]) pm[p].codes[x.r[2]]=0;
+   pm[p].codes[x.r[2]]++;
+   pm[p].i+=x.r[3]; pm[p].e+=x.e; pm[p].s+=x.r[4];
+ });
+ let panEntries=Object.entries(pm);
+ let panCards=panEntries.map(([p,x],idx)=>{
+   let variance=x.s-x.e;
+   let details=a.filter(z=>z.r[1]===p).map(z=>`<tr>
+     <td><b>${z.r[0]}</b></td><td>${z.r[2]}</td><td>${money(z.r[3])}</td>
+     <td>${money(z.e)}</td><td>${money(z.r[4])}</td><td>${money(Math.abs(z.d))}</td>
+     <td class="${z.status.toLowerCase()}">${z.status}</td></tr>`).join("");
+   return `<div class="pan-card">
+     <div class="pan-head">
+       <div><div class="pan-title">${p}</div>
+       <div class="muted">${x.ids.length} Customer ID(s) · ${Object.keys(x.codes).length} Tax Code(s)</div></div>
+       <button class="pan-toggle" data-pan="${idx}">View details</button>
+     </div>
+     <div class="pan-summary">
+       <div><span>Interest</span><strong>${money(x.i)}</strong></div>
+       <div><span>Expected TDS</span><strong>${money(x.e)}</strong></div>
+       <div><span>System TDS</span><strong>${money(x.s)}</strong></div>
+       <div><span>Variance</span><strong class="${Math.abs(variance)<.005?'pass':'under'}">${money(Math.abs(variance))}</strong></div>
+     </div>
+     <div class="pan-meta"><b>Customer-level Interest & TDS</b></div>
+     <div class="table"><table><thead><tr><th>Customer ID</th><th>Tax Code</th><th>Interest</th><th>Expected TDS</th><th>System TDS</th><th>Result</th></tr></thead>
+     <tbody>${a.filter(z=>z.r[1]===p).map(z=>`<tr><td><b>${z.r[0]}</b></td><td>${z.r[2]}</td><td>${money(z.r[3])}</td><td>${money(z.e)}</td><td>${money(z.r[4])}</td><td class="${z.status.toLowerCase()}">${z.status}</td></tr>`).join("")}</tbody></table></div>
+     <div class="pan-details hidden" id="pan-detail-${idx}"><b>Customer-level audit detail</b>
+       <div class="table"><table><thead><tr><th>Customer ID</th><th>Tax Code</th><th>Interest</th><th>Expected TDS</th><th>System TDS</th><th>Difference</th><th>Result</th></tr></thead><tbody>${details}</tbody></table></div>
+     </div>
+   </div>`;
+ }).join("");
+ document.getElementById("pan").innerHTML=`<div class="card">
+   <div class="section-head"><div><b>PAN Repository</b><p class="muted">PAN is a consolidation view. Each Customer ID and Tax Code remains separately verifiable.</p></div>
+   <div class="pan-count">${panEntries.length} PANs</div></div>
+   <div class="pan-list">${panCards}</div>
+ </div>`;
+ document.querySelectorAll(".pan-toggle").forEach(btn=>btn.onclick=()=>{
+   const box=document.getElementById("pan-detail-"+btn.dataset.pan);
+   box.classList.toggle("hidden");
+   btn.textContent=box.classList.contains("hidden")?"View details":"Hide details";
+ });
+ document.getElementById("upload").innerHTML=`<div class="card"><b>Monthly Backend File</b><p class="muted">Upload .txt/.csv for future parser integration. This prototype keeps the sample dataset loaded.</p><input id="f" type="file" accept=".txt,.csv"><button class="primary" id="process">Process File</button><p id="msg" class="muted"></p></div>`;
+ let cr=state.rules.map((x,i)=>`<tr><td>${x.code}</td><td>${x.desc}</td><td>${x.threshold===null?"—":money(x.threshold)}</td><td>${x.rate}%</td><td><button data-edit="${i}">Edit rate</button></td></tr>`).join("");
+ document.getElementById("codes").innerHTML=`<div class="card"><b>Tax Code Master</b><div class="table"><table><tr><th>Code</th><th>Description</th><th>Threshold</th><th>Rate</th><th>Action</th></tr>${cr}</table></div></div>
+ <div class="card"><b>Add Tax Code</b><div class="formgrid"><input id="nc" placeholder="Code"><input id="nd" placeholder="Description"><input id="nt" type="number" placeholder="Threshold; blank = none"><input id="nr" type="number" step=".01" placeholder="Rate %"></div><button class="primary" id="add">Add</button><span id="cm" class="muted"></span></div>`;
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{let i=+b.dataset.edit,v=prompt("New rate %",state.rules[i].rate);if(v!==null){state.rules[i].rate=Number(v)||0;render()}});
+ document.getElementById("add").onclick=()=>{let c=document.getElementById("nc").value.trim().toUpperCase(),d=document.getElementById("nd").value.trim(),t=document.getElementById("nt").value===""?null:Number(document.getElementById("nt").value),r=Number(document.getElementById("nr").value)||0;if(!c||state.rules.some(x=>x.code===c)){document.getElementById("cm").textContent="Enter a unique code.";return}state.rules.push({code:c,desc:d||c,threshold:t,rate:r});render()};
+ document.getElementById("process").onclick=()=>{let f=document.getElementById("f").files[0];state.file=f?f.name:state.file;state.batch="B"+Date.now().toString().slice(-7);document.getElementById("msg").textContent="Batch "+state.batch+" accepted for prototype processing."};
+}
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll("section").forEach(x=>x.classList.add("hidden"));document.getElementById(b.dataset.tab).classList.remove("hidden")});
+render();
+renderTests();
+</script>
+</body></html>
