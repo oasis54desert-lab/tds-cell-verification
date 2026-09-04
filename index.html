@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TDS Cell Verification System V1</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f5f6f8;color:#17202a}
+.wrap{max-width:1200px;margin:auto;padding:18px}.nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+button{padding:10px 14px;border:1px solid #ccd2d8;border-radius:8px;background:white;cursor:pointer}
+button.active,button.primary{background:#17202a;color:white}
+.card{background:white;border:1px solid #dde1e5;border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.formgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.num{font-size:24px;font-weight:700}.muted{color:#66717d;font-size:13px}.table{overflow:auto}
+table{width:100%;border-collapse:collapse;min-width:800px}th,td{padding:9px;border-bottom:1px solid #e4e7ea;text-align:left;font-size:13px}th{background:#f1f3f5}
+.pass{color:#16733b;font-weight:bold}.under{color:#b42318;font-weight:bold}.over{color:#9a6700;font-weight:bold}
+input,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccd2d8;border-radius:8px;font-size:15px}
+.hidden{display:none}.ok{background:#edf8f1}.testfail{background:#fdecec}.warn{background:#fff7e6}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:500px){.grid,.formgrid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>TDS Cell Verification System V1</h1>
+<p class="muted">Prototype: Customer-ID level TDS verification with PAN-level repository.</p>
+<div class="nav">
+<button class="active" data-tab="dash">Dashboard</button>
+<button data-tab="upload">Monthly File</button>
+<button data-tab="verify">Verification</button>
+<button data-tab="exceptions">Exceptions</button>
+<button data-tab="pan">PAN Repository</button>
+<button data-tab="codes">Tax Code Master</button><button data-tab="tests">Test Centre</button>
+</div>
+<section id="dash"></section><section id="upload" class="hidden"></section><section id="verify" class="hidden"></section>
+<section id="exceptions" class="hidden"></section><section id="pan" class="hidden"></section><section id="codes" class="hidden"></section><section id="tests" class="hidden"></section>
+</div>
+<script>
+const state={
+month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",
+rules:[
+{code:"TDSI",desc:"Citizen below 60 years",threshold:50000,rate:10},
+{code:"TDSRP",desc:"Senior Citizen",threshold:100000,rate:10},
+{code:"NOTDS",desc:"Nil TDS",threshold:null,rate:0},
+{code:"TDSN",desc:"NRE",threshold:null,rate:32},
+{code:"TD15G",desc:"15G rule",threshold:250000,rate:10},
+{code:"TD15H",desc:"15H rule",threshold:550000,rate:10}],
+records:[
+["CUST001","ABCDE1234F","TDSI",45000,0],["CUST002","FGHIJ5678K","TDSI",75000,7500],
+["CUST003","LMNOP9012Q","TDSI",90000,8000],["CUST004","ABCDE1234F","TDSRP",85000,0],
+["CUST005","RSTUV3456L","TDSRP",125000,12500],["CUST006","WXYZA7890M","TDSRP",150000,10000],
+["CUST007","BCDEF2345N","NOTDS",50000,0],["CUST008","CDEFG6789P","NOTDS",250000,0],
+["CUST009","DEFGH1234R","TDSN",100000,32000],["CUST010","EFGHI5678S","TDSN",250000,80000],
+["CUST011","FGHIJ9012T","TD15G",200000,0],["CUST012","GHIJK3456U","TD15G",250000,0],
+["CUST013","HIJKL7890V","TD15G",300000,30000],["CUST014","IJKLM2345W","TD15H",500000,0],
+["CUST015","JKLMN6789X","TD15H",550000,0],["CUST016","KLMNO1234Y","TD15H",600000,60000],
+["CUST017","ABCDE1234F","TDSI",60000,6000],["CUST018","ABCDE1234F","TDSI",40000,0],
+["CUST019","ABCDE1234F","TDSI",25000,0],["CUST020","ABCDE1234F","TDSRP",120000,12000],
+["CUST021","NEG0012345","TDSI",-10000,0]
+]};
+function rule(c){return state.rules.find(x=>x.code===c)}
+function expected(r){let x=rule(r[2]);if(!x)return null;let interest=r[3];if(interest<=0)return 0;if(x.rate===0)return 0;if(x.threshold===null)return interest*x.rate/100;return interest>x.threshold?interest*x.rate/100:0}
+function calc(){return state.records.map(r=>{let e=expected(r),d=r[4]-e;return{r,e,d,status:Math.abs(d)<.005?"PASS":d<0?"UNDER":"OVER"}})}
+function money(x){return "₹"+Number(x).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function table(a){return a.map(x=>`<tr><td>${x.r[0]}</td><td>${x.r[1]}</td><td>${x.r[2]}</td><td>${money(x.r[3])}</td><td>${money(x.e)}</td><td>${money(x.r[4])}</td><td>${money(Math.abs(x.d))}</td><td class="${x.status.toLowerCase()}">${x.status}</td></tr>`).join("")}
+
+function renderTests(){
+ let a=calc();
+ let cases=[
+  ["TDSI at threshold",50000,0],
+  ["TDSI above threshold",50001,5000.10],
+  ["TDSRP at threshold",100000,0],
+  ["TDSRP above threshold",100001,10000.10],
+  ["NOTDS whole amount",500000,0],
+  ["TDSN whole amount",100000,32000],
+  ["TD15G at threshold",250000,0],
+  ["TD15G above threshold",250001,25000.10],
+  ["TD15H at threshold",550000,0],
+  ["TD15H above threshold",550001,55000.10],
+  ["Negative interest", -10000, 0]
+ ];
+ let rows=cases.map(c=>{
+   let code=c[0].startsWith("TDSI")?"TDSI":c[0].startsWith("TDSRP")?"TDSRP":c[0].startsWith("NOTDS")?"NOTDS":c[0].startsWith("TDSN")?"TDSN":c[0].startsWith("TD15G")?"TD15G":c[0].startsWith("TD15H")?"TD15H":"TDSI";
+   let r=["TEST","TESTPAN",code,c[1],0],e=expected(r),pass=Math.abs(e-c[2])<.005;
+   return `<tr><td>${c[0]}</td><td>${code}</td><td>${money(c[1])}</td><td>${money(c[2])}</td><td>${money(e)}</td><td class="${pass?"pass":"under"}">${pass?"PASS":"FAIL"}</td></tr>`;
+ }).join("");
+ let ruleCoverage=state.rules.map(x=>`<li><b>${x.code}</b> — ${x.desc}</li>`).join("");
+ document.getElementById("tests").innerHTML=`<div class="card"><b>Test Centre</b><p class="muted">Automated regression tests for the current Tax Code Master. Run this after adding or changing rules.</p><button class="primary" id="runTests">Run Tests</button><span id="testSummary" class="muted" style="margin-left:10px"></span><div class="table"><table><tr><th>Test</th><th>Code</th><th>Interest</th><th>Expected</th><th>Engine</th><th>Result</th></tr>${rows}</table></div></div>
+ <div class="card"><b>Current rule coverage</b><ul class="muted">${ruleCoverage}</ul></div>`;
+ document.getElementById("runTests").onclick=()=>{let total=cases.length;let pass=rows.match(/>PASS</g)?.length||0;document.getElementById("testSummary").textContent=`${pass}/${total} tests passed.`};
+}
+
+function render(){
+ let a=calc(), interest=a.reduce((s,x)=>s+x.r[3],0),exp=a.reduce((s,x)=>s+x.e,0),act=a.reduce((s,x)=>s+x.r[4],0);
+ document.getElementById("dash").innerHTML=`<div class="grid">
+ <div class="card"><div class="muted">Records</div><div class="num">${a.length}</div></div>
+ <div class="card"><div class="muted">Net interest</div><div class="num">${money(interest)}</div></div>
+ <div class="card"><div class="muted">Expected TDS</div><div class="num">${money(exp)}</div></div>
+ <div class="card"><div class="muted">System TDS</div><div class="num">${money(act)}</div></div></div>
+ <div class="grid"><div class="card ok"><div class="muted">PASS</div><div class="num">${a.filter(x=>x.status==="PASS").length}</div></div>
+ <div class="card warn"><div class="muted">UNDER</div><div class="num">${a.filter(x=>x.status==="UNDER").length}</div></div>
+ <div class="card warn"><div class="muted">OVER</div><div class="num">${a.filter(x=>x.status==="OVER").length}</div></div>
+ <div class="card"><div class="muted">Batch</div><div class="num" style="font-size:18px">${state.batch}</div></div></div>
+ <div class="card"><b>V1 scope</b><p class="muted">Customer ID is the primary verification key. PAN is retained for consolidation and may contain multiple Customer IDs and multiple tax codes.</p></div>`;
+ document.getElementById("verify").innerHTML=`<div class="card"><b>Customer ID Verification</b><div class="table">${table(a)}</div></div>`;
+ document.getElementById("exceptions").innerHTML=`<div class="card"><b>Exceptions</b><div class="table">${table(a.filter(x=>x.status!=="PASS"))}</div></div>`;
+ let pm={};a.forEach(x=>{let p=x.r[1];if(!pm[p])pm[p]={ids:new Set(),i:0,e:0,s:0,codes:new Set()};pm[p].ids.add(x.r[0]);pm[p].codes.add(x.r[2]);pm[p].i+=x.r[3];pm[p].e+=x.e;pm[p].s+=x.r[4]});
+ let pr=Object.entries(pm).map(([p,x])=>`<tr><td>${p}</td><td>${[...x.ids].join(", ")}</td><td>${[...x.codes].join(", ")}</td><td>${money(x.i)}</td><td>${money(x.e)}</td><td>${money(x.s)}</td><td>${money(Math.abs(x.s-x.e))}</td></tr>`).join("");
+ document.getElementById("pan").innerHTML=`<div class="card"><b>PAN Repository</b><p class="muted">Consolidated view; different tax codes under the same PAN remain separately identifiable.</p><div class="table"><table><tr><th>PAN</th><th>Customer IDs</th><th>Tax Codes</th><th>Interest</th><th>Expected TDS</th><th>System TDS</th><th>Variance</th></tr>${pr}</table></div></div>`;
+ document.getElementById("upload").innerHTML=`<div class="card"><b>Monthly Backend File</b><p class="muted">Upload .txt/.csv for future parser integration. This prototype keeps the sample dataset loaded.</p><input id="f" type="file" accept=".txt,.csv"><button class="primary" id="process">Process File</button><p id="msg" class="muted"></p></div>`;
+ let cr=state.rules.map((x,i)=>`<tr><td>${x.code}</td><td>${x.desc}</td><td>${x.threshold===null?"—":money(x.threshold)}</td><td>${x.rate}%</td><td><button data-edit="${i}">Edit rate</button></td></tr>`).join("");
+ document.getElementById("codes").innerHTML=`<div class="card"><b>Tax Code Master</b><div class="table"><table><tr><th>Code</th><th>Description</th><th>Threshold</th><th>Rate</th><th>Action</th></tr>${cr}</table></div></div>
+ <div class="card"><b>Add Tax Code</b><div class="formgrid"><input id="nc" placeholder="Code"><input id="nd" placeholder="Description"><input id="nt" type="number" placeholder="Threshold; blank = none"><input id="nr" type="number" step=".01" placeholder="Rate %"></div><button class="primary" id="add">Add</button><span id="cm" class="muted"></span></div>`;
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{let i=+b.dataset.edit,v=prompt("New rate %",state.rules[i].rate);if(v!==null){state.rules[i].rate=Number(v)||0;render()}});
+ document.getElementById("add").onclick=()=>{let c=document.getElementById("nc").value.trim().toUpperCase(),d=document.getElementById("nd").value.trim(),t=document.getElementById("nt").value===""?null:Number(document.getElementById("nt").value),r=Number(document.getElementById("nr").value)||0;if(!c||state.rules.some(x=>x.code===c)){document.getElementById("cm").textContent="Enter a unique code.";return}state.rules.push({code:c,desc:d||c,threshold:t,rate:r});render()};
+ document.getElementById("process").onclick=()=>{let f=document.getElementById("f").files[0];state.file=f?f.name:state.file;state.batch="B"+Date.now().toString().slice(-7);document.getElementById("msg").textContent="Batch "+state.batch+" accepted for prototype processing."};
+}
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll("section").forEach(x=>x.classList.add("hidden"));document.getElementById(b.dataset.tab).classList.remove("hidden")});
+renderTests();
+render();
+</script>
+</body></html>
