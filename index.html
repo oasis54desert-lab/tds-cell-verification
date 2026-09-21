@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</title>
+<title>TDS Cell Verification System V12.7 — Certificate-driven LDC</title>
 <style>
 :root{--bg:#f5f6f8;--ink:#17202a;--muted:#66717d;--line:#dde1e5;--ok:#16733b;--bad:#b42318;--warn:#9a6700}
 *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
@@ -34,7 +34,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 </head>
 <body>
 <div id="login" class="login card">
-<h2>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</h2>
+<h2>TDS Cell Verification System V12.7 — Certificate-driven LDC</h2>
 <p class="muted">Prototype login — local browser access only. Not a security control for production.</p>
 <div class="grid2"><input id="lu" placeholder="Username" value="admin"><input id="lp" type="password" placeholder="Password"></div>
 <button class="primary" id="loginBtn" style="margin-top:10px">Sign in</button>
@@ -44,7 +44,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 
 <div id="app" class="wrap hidden">
 <div class="top">
-<div><h1>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
+<div><h1>TDS Cell Verification System V12.7 — Certificate-driven LDC</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
 <div class="toolbar"><span class="pill" id="userPill">admin</span><button id="logout">Logout</button></div>
 </div>
 <div class="nav">
@@ -101,7 +101,8 @@ const SAMPLE=[
 ["CUST019","ABCDE1234F","TDSI",25000,0],["CUST020","ABCDE1234F","TDSRP",120000,12000],
 ["CUST021","NEG0012345","TDSI",-10000,0]
 ];
-const state={month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",rules:structuredClone(DEFAULT_RULES),records:structuredClone(SAMPLE),loggedIn:false,query:"",review:loadJSON("tds_v12_review",{})};
+const LDC_CERTS_KEY="tds_v127_ldc_certificates";
+const state={month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",rules:structuredClone(DEFAULT_RULES),records:structuredClone(SAMPLE),loggedIn:false,query:"",review:loadJSON("tds_v12_review",{}),ldcCertificates:loadJSON(LDC_CERTS_KEY,[])};
 const uploadState={headers:[],rows:[],delimiter:"",fileName:""};
 
 function rule(c){const key=String(c??"").trim().toUpperCase();return state.rules.find(x=>x.code===key)}
@@ -127,49 +128,32 @@ function calc(){
  return {r,e,d,status};
  });
 }
-function calcLdcExpected(interest, rule){
- const amt=Math.max(0,Number(interest)||0);
- const lim=Math.max(0,Number(rule?.threshold)||0);
- const ldcPart=Math.min(amt,lim);
- const excess=Math.max(0,amt-lim);
- const ldcRate=Number(rule?.rate)||1;
- const normalRate=Number(rule?.normalRate)||10;
- const ldcTds=ldcPart*ldcRate/100;
- const excessTds=excess*normalRate/100;
- return {interest:amt,ldcPart,excess,ldcTds,excessTds,expectedTds:ldcTds+excessTds};
+function saveLdcCertificates(){localStorage.setItem(LDC_CERTS_KEY,JSON.stringify(state.ldcCertificates))}
+function monthDate(){const m=/^(\d{4})-(\d{2})$/.exec(state.month||"");return m?new Date(Number(m[1]),Number(m[2])-1,15):new Date()}
+function parseDate(v){if(!v)return null;const d=new Date(v+"T00:00:00");return isNaN(d)?null:d}
+function certificateFor(pan,code){
+ const d=monthDate();
+ return state.ldcCertificates.find(c=>normalizeIdentifier(c.pan)===normalizeIdentifier(pan)&&String(c.eCode||"").toUpperCase()===String(code||"").toUpperCase()&&(!parseDate(c.validFrom)||d>=parseDate(c.validFrom))&&(!parseDate(c.validTo)||d<=parseDate(c.validTo)));
+}
+function calcCertificateLdc(interest,cert){
+ const amt=Math.max(0,Number(interest)||0),sanctioned=Math.max(0,Number(cert?.amount)||0),prior=Math.max(0,Number(cert?.priorUtilised)||0);
+ const available=Math.max(0,sanctioned-prior),covered=Math.min(amt,available),excess=Math.max(0,amt-covered);
+ const ldcRate=Math.max(0,Number(cert?.rate)||0),normalRate=Math.max(0,Number(cert?.normalRate)||10);
+ const ldcTds=covered*ldcRate/100,excessTds=excess*normalRate/100;
+ return {interest:amt,sanctioned,prior,available,covered,excess,ldcRate,normalRate,ldcTds,excessTds,expectedTds:ldcTds+excessTds,balance:Math.max(0,available-covered)};
 }
 function ldcCalc(){
  const groups={};
  state.records.filter(isLDC).forEach(r=>{
-   const pan=String(r[1]||"").trim().toUpperCase();
-   const code=String(r[2]||"").trim().toUpperCase();
-   if(!groups[pan]) groups[pan]={pan,rows:[],codes:{},interest:0,system:0,expectedTds:0};
-   groups[pan].rows.push(r);
-   if(!groups[pan].codes[code]) groups[pan].codes[code]={code,rows:[],interest:0,system:0,rule:rule(code)};
-   const cg=groups[pan].codes[code];
-   cg.rows.push(r);
-   cg.interest += Math.max(0,Number(r[3])||0);
-   cg.system += Math.max(0,Number(r[4])||0);
-   groups[pan].interest += Math.max(0,Number(r[3])||0);
-   groups[pan].system += Math.max(0,Number(r[4])||0);
+  const pan=normalizeIdentifier(r[1]),code=String(r[2]||"").trim().toUpperCase(),key=pan+"|"+code;
+  if(!groups[key])groups[key]={pan,code,rows:[],interest:0,system:0};
+  groups[key].rows.push(r);groups[key].interest+=Math.max(0,Number(r[3])||0);groups[key].system+=Math.max(0,Number(r[4])||0);
  });
  return Object.values(groups).map(g=>{
-   const codeGroups=Object.values(g.codes);
-   const valid=codeGroups.every(c=>c.rule && c.rule.ldc);
-   if(!valid){
-     return {...g,code:codeGroups.map(c=>c.code).join(", "),breakdown:codeGroups,calc:{ldcPart:0,excess:g.interest,ldcTds:0,excessTds:0,expectedTds:0},difference:g.system,status:"REVIEW"};
-   }
-   const breakdown=codeGroups.map(c=>{
-     const calc=calcLdcExpected(c.interest,c.rule);
-     return {...c,calc};
-   });
-   const expectedTds=breakdown.reduce((s,c)=>s+c.calc.expectedTds,0);
-   const ldcPart=breakdown.reduce((s,c)=>s+c.calc.ldcPart,0);
-   const excess=breakdown.reduce((s,c)=>s+c.calc.excess,0);
-   const ldcTds=breakdown.reduce((s,c)=>s+c.calc.ldcTds,0);
-   const excessTds=breakdown.reduce((s,c)=>s+c.calc.excessTds,0);
-   const difference=g.system-expectedTds;
-   return {...g,code:codeGroups.map(c=>c.code).join(", "),breakdown,calc:{interest:g.interest,ldcPart,excess,ldcTds,excessTds,expectedTds},difference,status:Math.abs(difference)<.005?"PASS":difference<0?"UNDER":"OVER"};
+  const cert=certificateFor(g.pan,g.code);
+  if(!cert)return {...g,cert:null,calc:null,difference:g.system,status:"REVIEW",reason:"No valid LDC certificate mapped for this PAN + E-code / month"};
+  const c=calcCertificateLdc(g.interest,cert),difference=g.system-c.expectedTds;
+  return {...g,cert,calc:c,difference,status:Math.abs(difference)<.005?"PASS":difference<0?"UNDER":"OVER",reason:"Certificate matched"};
  });
 }
 function money(x){return "₹"+Number(x||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -308,31 +292,28 @@ function render(){
  document.getElementById("pan").innerHTML=`<div class="card"><div class="toolbar"><b>PAN Repository</b><button id="pexport" class="primary">Export PAN Assessment</button><button id="pprint">Print Report</button></div><p class="muted">Every normal PAN shows its Customer IDs, interest, customer-level TDS and PAN-level assessment. FORM60 declarations are excluded from PAN-wise consolidation and remain available in Customer-ID Verification.</p>${form60Rows.length?`<p class="muted"><b>FORM60 records excluded from PAN Repository:</b> ${form60Rows.length}</p>`:""}<div class="pan-list">${cards||`<p class="muted">No normal PAN records available for consolidation.</p>`}</div></div>`;
  const ld=ldcCalc();
  document.getElementById("ldc").innerHTML=`<div class="grid">
- <div class="card"><div class="muted">LDC PANs</div><div class="num">${ld.length}</div></div>
- <div class="card"><div class="muted">LDC Customer IDs</div><div class="num">${state.records.filter(isLDC).length}</div></div>
- <div class="card"><div class="muted">PAN Expected LDC TDS</div><div class="num">${money(ld.reduce((s,x)=>s+x.calc.expectedTds,0))}</div></div>
- <div class="card"><div class="muted">PAN System TDS</div><div class="num">${money(ld.reduce((s,x)=>s+x.system,0))}</div></div></div>
- <div class="card"><div class="toolbar"><b>LDC Analysis — PAN Level (E Tax Codes Only)</b><button id="ldcExport" class="primary">Export LDC Analysis</button></div>
- <p class="muted">LDC is issued against PAN. Different E-tax codes may exist under the same PAN. Each E-code is calculated separately using its own LDC limit/rate, and the resulting TDS amounts are then consolidated at PAN level. Only the excess above each E-code's own limit is charged at the normal rate.</p>
- <div class="toolbar"><input id="ldcSearch" placeholder="Search Customer ID / PAN / E Code"></div>
- <div id="ldcCards"></div></div>`;
+ <div class="card"><div class="muted">LDC PAN/E-code Groups</div><div class="num">${ld.length}</div></div>
+ <div class="card"><div class="muted">LDC Certificates</div><div class="num">${state.ldcCertificates.length}</div></div>
+ <div class="card"><div class="muted">Expected LDC TDS</div><div class="num">${money(ld.reduce((s,x)=>s+(x.calc?.expectedTds||0),0))}</div></div>
+ <div class="card"><div class="muted">System LDC TDS</div><div class="num">${money(ld.reduce((s,x)=>s+x.system,0))}</div></div></div>
+ <div class="card"><b>LDC Certificate Master</b><p class="muted">Certificate-driven control: PAN + certificate number + E-code + sanctioned amount + LDC rate + validity. Prior utilisation can be entered so only the remaining certificate balance is available to the loaded month. Excess is taxed at the configured normal rate.</p>
+ <div class="grid2"><input id="lcPan" placeholder="PAN"><input id="lcCert" placeholder="Certificate No."><input id="lcCode" placeholder="E-code e.g. E2001"><input id="lcAmount" type="number" placeholder="Sanctioned amount"><input id="lcRate" type="number" step=".01" placeholder="LDC rate %"><input id="lcNormal" type="number" step=".01" value="10" placeholder="Normal rate %"><label>Valid From<input id="lcFrom" type="date"></label><label>Valid To<input id="lcTo" type="date"></label><input id="lcPrior" type="number" value="0" placeholder="Prior utilised amount"><input id="lcRemarks" placeholder="Remarks"></div>
+ <button id="lcAdd" class="primary" style="margin-top:10px">Add Certificate</button><span id="lcMsg" class="muted" style="margin-left:8px"></span>
+ <div class="table"><table><thead><tr><th>PAN</th><th>Certificate</th><th>E-code</th><th>Amount</th><th>LDC Rate</th><th>Normal Rate</th><th>Valid From</th><th>Valid To</th><th>Prior Utilised</th><th>Remarks</th><th></th></tr></thead><tbody>${state.ldcCertificates.map((c,i)=>`<tr><td>${esc(c.pan)}</td><td>${esc(c.certificateNo)}</td><td>${esc(c.eCode)}</td><td>${money(c.amount)}</td><td>${c.rate}%</td><td>${c.normalRate}%</td><td>${esc(c.validFrom)}</td><td>${esc(c.validTo)}</td><td>${money(c.priorUtilised)}</td><td>${esc(c.remarks||"")}</td><td><button data-delcert="${i}" class="danger">Delete</button></td></tr>`).join("")||`<tr><td colspan="11" class="muted">No LDC certificates entered yet.</td></tr>`}</tbody></table></div></div>
+ <div class="card"><div class="toolbar"><b>LDC Analysis — Certificate Driven</b><button id="ldcExport" class="primary">Export LDC Analysis</button></div><p class="muted">Only E-code backend records appear here. A valid certificate must match PAN + E-code and the selected processing month. Covered amount uses the certificate rate; only excess beyond the available certificate balance uses the normal rate.</p><div class="toolbar"><input id="ldcSearch" placeholder="Search Customer ID / PAN / E Code / Certificate"></div><div id="ldcCards"></div></div>`;
  const renderLdcCards=()=>{
-   const q=(document.getElementById("ldcSearch")?.value||"").trim().toLowerCase();
-   const filtered=q?ld.filter(g=>g.pan.toLowerCase().includes(q)||g.code.toLowerCase().includes(q)||g.rows.some(r=>r.join(" ").toLowerCase().includes(q))):ld;
-   document.getElementById("ldcCards").innerHTML=filtered.map(g=>{
-     const c=g.calc;
-     const resultClass=g.status.toLowerCase();
-     const breakdownHtml=g.breakdown.map(b=>`<div class="card" style="margin-top:10px"><div class="pan-head"><div><b>${esc(b.code)}</b><div class="muted">${b.rows.length} Customer ID(s) under this E-code</div></div><span class="pill">Separate slab</span></div><div class="pan-summary"><div><span>E-code Interest</span><strong>${money(b.interest)}</strong></div><div><span>LDC Limit</span><strong>${money(b.rule?.threshold||0)}</strong></div><div><span>LDC Portion @ ${b.rule?.rate||1}%</span><strong>${money(b.calc.ldcTds)}</strong></div><div><span>Excess @ ${b.rule?.normalRate||10}%</span><strong>${money(b.calc.excessTds)}</strong></div><div><span>E-code Expected TDS</span><strong>${money(b.calc.expectedTds)}</strong></div><div><span>E-code System TDS</span><strong>${money(b.system)}</strong></div></div><div class="table"><table><thead><tr><th>Customer ID</th><th>Interest</th><th>System TDS</th></tr></thead><tbody>${b.rows.map(r=>`<tr><td><b>${esc(r[0])}</b></td><td>${money(r[3])}</td><td>${money(r[4])}</td></tr>`).join("")}</tbody></table></div></div>`).join("");
-     return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)}</div><div class="muted">${g.rows.length} Customer ID(s) · ${g.breakdown.length} E Tax Code(s)</div></div><span class="pill ${resultClass}">${g.status}</span></div>
-     <div class="pan-summary"><div><span>Accumulated PAN Interest</span><strong>${money(g.interest)}</strong></div><div><span>Total LDC Portion TDS</span><strong>${money(c.ldcTds)}</strong></div><div><span>Total Excess TDS</span><strong>${money(c.excessTds)}</strong></div><div><span>PAN Expected TDS</span><strong>${money(c.expectedTds)}</strong></div><div><span>System TDS</span><strong>${money(g.system)}</strong></div></div>
-     <div class="auditbox ${resultClass==='pass'?'okbox':resultClass==='under'?'badbox':'warnbox'}">PAN Difference: ${money(Math.abs(g.difference))} — ${g.status}</div>
-     ${breakdownHtml}
-     </div>`;
-   }).join("")||`<div class="card muted">No E tax-code records found in the loaded monthly file.</div>`;
+  const q=(document.getElementById("ldcSearch")?.value||"").trim().toLowerCase();
+  const filtered=q?ld.filter(g=>[g.pan,g.code,g.cert?.certificateNo||"",...g.rows.flat()].join(" ").toLowerCase().includes(q)):ld;
+  document.getElementById("ldcCards").innerHTML=filtered.map(g=>{
+   if(!g.cert)return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)} · ${esc(g.code)}</div><div class="muted">${g.rows.length} Customer ID(s)</div></div><span class="pill under">REVIEW</span></div><div class="auditbox warnbox">${esc(g.reason)}</div></div>`;
+   const c=g.calc,cls=g.status.toLowerCase();
+   return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)} · ${esc(g.code)}</div><div class="muted">Certificate ${esc(g.cert.certificateNo)} · valid ${esc(g.cert.validFrom)} to ${esc(g.cert.validTo)}</div></div><span class="pill ${cls}">${g.status}</span></div><div class="pan-summary"><div><span>Current Interest</span><strong>${money(g.interest)}</strong></div><div><span>Sanctioned Amount</span><strong>${money(c.sanctioned)}</strong></div><div><span>Prior Utilised</span><strong>${money(c.prior)}</strong></div><div><span>Available Before Month</span><strong>${money(c.available)}</strong></div><div><span>Covered @ ${c.ldcRate}%</span><strong>${money(c.covered)}</strong></div><div><span>Balance After Month</span><strong>${money(c.balance)}</strong></div><div><span>Excess @ ${c.normalRate}%</span><strong>${money(c.excess)}</strong></div><div><span>Expected TDS</span><strong>${money(c.expectedTds)}</strong></div><div><span>System TDS</span><strong>${money(g.system)}</strong></div></div><div class="auditbox ${cls==="pass"?"okbox":cls==="under"?"badbox":"warnbox"}">Difference: ${money(Math.abs(g.difference))} — ${g.status}</div><div class="table"><table><thead><tr><th>Customer ID</th><th>Interest</th><th>System TDS</th></tr></thead><tbody>${g.rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${money(r[3])}</td><td>${money(r[4])}</td></tr>`).join("")}</tbody></table></div></div>`;
+  }).join("")||`<div class="card muted">No E-code records found.</div>`;
  };
- renderLdcCards();
- document.getElementById("ldcSearch").oninput=renderLdcCards;
- document.getElementById("ldcExport").onclick=()=>exportCSV("tds_ldc_pan_analysis.csv",["PAN","Customer IDs","E Tax Codes","Accumulated PAN Interest","Total LDC Portion TDS","Total Excess TDS","Expected PAN TDS","System PAN TDS","Difference","Result"],ld.map(g=>[g.pan,g.rows.map(r=>r[0]).join(" | "),g.breakdown.map(b=>b.code+"="+b.interest).join(" | "),g.interest,g.calc.ldcTds,g.calc.excessTds,g.calc.expectedTds,g.system,Math.abs(g.difference),g.status]));
+ renderLdcCards();document.getElementById("ldcSearch").oninput=renderLdcCards;
+ document.getElementById("lcAdd").onclick=()=>{const c={pan:normalizeIdentifier(document.getElementById("lcPan").value),certificateNo:document.getElementById("lcCert").value.trim(),eCode:document.getElementById("lcCode").value.trim().toUpperCase(),amount:Number(document.getElementById("lcAmount").value),rate:Number(document.getElementById("lcRate").value),normalRate:Number(document.getElementById("lcNormal").value||10),validFrom:document.getElementById("lcFrom").value,validTo:document.getElementById("lcTo").value,priorUtilised:Number(document.getElementById("lcPrior").value||0),remarks:document.getElementById("lcRemarks").value.trim()};if(!isNormalPAN(c.pan)||!c.certificateNo||!c.eCode.startsWith("E")||!(c.amount>=0)||!(c.rate>=0)||!c.validFrom||!c.validTo){document.getElementById("lcMsg").textContent="Enter valid PAN, certificate, E-code, amount, rate and validity dates.";return}state.ldcCertificates.push(c);saveLdcCertificates();render()};
+ document.querySelectorAll("[data-delcert]").forEach(b=>b.onclick=()=>{state.ldcCertificates.splice(Number(b.dataset.delcert),1);saveLdcCertificates();render()});
+ document.getElementById("ldcExport").onclick=()=>exportCSV("tds_ldc_certificate_analysis.csv",["PAN","E-code","Certificate No","Current Interest","Sanctioned Amount","Prior Utilised","Covered Amount","LDC Rate","Excess Amount","Normal Rate","Expected TDS","System TDS","Difference","Result"],ld.map(g=>[g.pan,g.code,g.cert?.certificateNo||"",g.interest,g.calc?.sanctioned||0,g.calc?.prior||0,g.calc?.covered||0,g.calc?.ldcRate||0,g.calc?.excess||0,g.calc?.normalRate||0,g.calc?.expectedTds||0,g.system,Math.abs(g.difference),g.status]));
  document.getElementById("upload").innerHTML=`<div class="card"><b>Monthly Backend File</b>
  <p class="muted">Upload the backend TXT/CSV directly. This version no longer assumes that the required five fields are the first five columns. It reads the header, auto-detects fields such as <b>cust_id</b>, <b>PAN</b>, <b>tax code / TDS code</b>, <b>INT_AMT</b> and <b>RECOMMENDED_TDS_AMT</b>, then shows a mapping screen when detection is uncertain. Pipe-delimited backend exports are supported.</p>
  <div class="grid2"><input id="monthInput" type="month" value="${state.month}"><input id="fileInput" type="file" accept=".txt,.csv,.dat"></div>
