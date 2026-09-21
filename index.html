@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TDS Cell Verification System V12.5 — FORM60 + TDSN Rate Fix</title>
+<title>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</title>
 <style>
 :root{--bg:#f5f6f8;--ink:#17202a;--muted:#66717d;--line:#dde1e5;--ok:#16733b;--bad:#b42318;--warn:#9a6700}
 *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
@@ -34,7 +34,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 </head>
 <body>
 <div id="login" class="login card">
-<h2>TDS Cell Verification System V12.5 — FORM60 + TDSN Rate Fix</h2>
+<h2>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</h2>
 <p class="muted">Prototype login — local browser access only. Not a security control for production.</p>
 <div class="grid2"><input id="lu" placeholder="Username" value="admin"><input id="lp" type="password" placeholder="Password"></div>
 <button class="primary" id="loginBtn" style="margin-top:10px">Sign in</button>
@@ -44,7 +44,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 
 <div id="app" class="wrap hidden">
 <div class="top">
-<div><h1>TDS Cell Verification System V12.5 — FORM60 + TDSN Rate Fix</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
+<div><h1>TDS Cell Verification System V12.6 — TDSC + FORM60 + TDSN 31.2% Fix</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
 <div class="toolbar"><span class="pill" id="userPill">admin</span><button id="logout">Logout</button></div>
 </div>
 <div class="nav">
@@ -62,6 +62,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 <script>
 const DEFAULT_RULES=[
  {code:"TDSI",desc:"Citizen below 60 years",threshold:50000,rate:10,mode:"all"},
+ {code:"TDSC",desc:"Normal TDS — backend customer code",threshold:null,rate:10,mode:"all"},
  {code:"TDSRP",desc:"Senior Citizen",threshold:100000,rate:10,mode:"all"},
  {code:"NOTDS",desc:"Nil TDS",threshold:null,rate:0,mode:"all"},
  {code:"TDSN",desc:"NRE",threshold:null,rate:31.2,mode:"all"},
@@ -103,7 +104,7 @@ const SAMPLE=[
 const state={month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",rules:structuredClone(DEFAULT_RULES),records:structuredClone(SAMPLE),loggedIn:false,query:"",review:loadJSON("tds_v12_review",{})};
 const uploadState={headers:[],rows:[],delimiter:"",fileName:""};
 
-function rule(c){return state.rules.find(x=>x.code===c)}
+function rule(c){const key=String(c??"").trim().toUpperCase();return state.rules.find(x=>x.code===key)}
 function expected(r){
  const t=rule(String(r[2]||"").trim().toUpperCase());
  if(!t) return null;
