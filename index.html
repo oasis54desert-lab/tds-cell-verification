@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TDS Cell Verification System V12.7 — Certificate-driven LDC</title>
+<title>TDS Cell Verification System V12.8 — Persistent LDC Utilisation</title>
 <style>
 :root{--bg:#f5f6f8;--ink:#17202a;--muted:#66717d;--line:#dde1e5;--ok:#16733b;--bad:#b42318;--warn:#9a6700}
 *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
@@ -34,7 +34,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 </head>
 <body>
 <div id="login" class="login card">
-<h2>TDS Cell Verification System V12.7 — Certificate-driven LDC</h2>
+<h2>TDS Cell Verification System V12.8 — Persistent LDC Utilisation</h2>
 <p class="muted">Prototype login — local browser access only. Not a security control for production.</p>
 <div class="grid2"><input id="lu" placeholder="Username" value="admin"><input id="lp" type="password" placeholder="Password"></div>
 <button class="primary" id="loginBtn" style="margin-top:10px">Sign in</button>
@@ -44,7 +44,7 @@ input,select{width:100%;padding:9px;border:1px solid #ccd2d8;border-radius:8px;f
 
 <div id="app" class="wrap hidden">
 <div class="top">
-<div><h1>TDS Cell Verification System V12.7 — Certificate-driven LDC</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
+<div><h1>TDS Cell Verification System V12.8 — Persistent LDC Utilisation</h1><div class="muted">Customer-ID verification + PAN repository + monthly history + exports</div></div>
 <div class="toolbar"><span class="pill" id="userPill">admin</span><button id="logout">Logout</button></div>
 </div>
 <div class="nav">
@@ -129,6 +129,15 @@ function calc(){
  });
 }
 function saveLdcCertificates(){localStorage.setItem(LDC_CERTS_KEY,JSON.stringify(state.ldcCertificates))}
+function certKey(c){return [normalizeIdentifier(c.pan),String(c.certificateNo||"").trim().toUpperCase(),String(c.eCode||"").trim().toUpperCase()].join("|")}
+function loadLdcUsage(){return loadJSON("tds_v128_ldc_usage",{})}
+function saveLdcUsage(x){localStorage.setItem("tds_v128_ldc_usage",JSON.stringify(x))}
+function committedUsage(cert){return Math.max(0,Number(loadLdcUsage()[certKey(cert)]||0))}
+function commitCurrentLdcMonth(){
+ const usage=loadLdcUsage(),ld=ldcCalc();let n=0;
+ ld.forEach(g=>{if(!g.cert||!g.calc)return;const k=certKey(g.cert);usage[k]=Math.max(Number(usage[k]||0),g.calc.prior+g.calc.covered);n++});
+ saveLdcUsage(usage);return n;
+}
 function monthDate(){const m=/^(\d{4})-(\d{2})$/.exec(state.month||"");return m?new Date(Number(m[1]),Number(m[2])-1,15):new Date()}
 function parseDate(v){if(!v)return null;const d=new Date(v+"T00:00:00");return isNaN(d)?null:d}
 function certificateFor(pan,code){
@@ -136,7 +145,7 @@ function certificateFor(pan,code){
  return state.ldcCertificates.find(c=>normalizeIdentifier(c.pan)===normalizeIdentifier(pan)&&String(c.eCode||"").toUpperCase()===String(code||"").toUpperCase()&&(!parseDate(c.validFrom)||d>=parseDate(c.validFrom))&&(!parseDate(c.validTo)||d<=parseDate(c.validTo)));
 }
 function calcCertificateLdc(interest,cert){
- const amt=Math.max(0,Number(interest)||0),sanctioned=Math.max(0,Number(cert?.amount)||0),prior=Math.max(0,Number(cert?.priorUtilised)||0);
+ const amt=Math.max(0,Number(interest)||0),sanctioned=Math.max(0,Number(cert?.amount)||0),prior=Math.max(Math.max(0,Number(cert?.priorUtilised)||0),committedUsage(cert));
  const available=Math.max(0,sanctioned-prior),covered=Math.min(amt,available),excess=Math.max(0,amt-covered);
  const ldcRate=Math.max(0,Number(cert?.rate)||0),normalRate=Math.max(0,Number(cert?.normalRate)||10);
  const ldcTds=covered*ldcRate/100,excessTds=excess*normalRate/100;
@@ -300,7 +309,7 @@ function render(){
  <div class="grid2"><input id="lcPan" placeholder="PAN"><input id="lcCert" placeholder="Certificate No."><input id="lcCode" placeholder="E-code e.g. E2001"><input id="lcAmount" type="number" placeholder="Sanctioned amount"><input id="lcRate" type="number" step=".01" placeholder="LDC rate %"><input id="lcNormal" type="number" step=".01" value="10" placeholder="Normal rate %"><label>Valid From<input id="lcFrom" type="date"></label><label>Valid To<input id="lcTo" type="date"></label><input id="lcPrior" type="number" value="0" placeholder="Prior utilised amount"><input id="lcRemarks" placeholder="Remarks"></div>
  <button id="lcAdd" class="primary" style="margin-top:10px">Add Certificate</button><span id="lcMsg" class="muted" style="margin-left:8px"></span>
  <div class="table"><table><thead><tr><th>PAN</th><th>Certificate</th><th>E-code</th><th>Amount</th><th>LDC Rate</th><th>Normal Rate</th><th>Valid From</th><th>Valid To</th><th>Prior Utilised</th><th>Remarks</th><th></th></tr></thead><tbody>${state.ldcCertificates.map((c,i)=>`<tr><td>${esc(c.pan)}</td><td>${esc(c.certificateNo)}</td><td>${esc(c.eCode)}</td><td>${money(c.amount)}</td><td>${c.rate}%</td><td>${c.normalRate}%</td><td>${esc(c.validFrom)}</td><td>${esc(c.validTo)}</td><td>${money(c.priorUtilised)}</td><td>${esc(c.remarks||"")}</td><td><button data-delcert="${i}" class="danger">Delete</button></td></tr>`).join("")||`<tr><td colspan="11" class="muted">No LDC certificates entered yet.</td></tr>`}</tbody></table></div></div>
- <div class="card"><div class="toolbar"><b>LDC Analysis — Certificate Driven</b><button id="ldcExport" class="primary">Export LDC Analysis</button></div><p class="muted">Only E-code backend records appear here. A valid certificate must match PAN + E-code and the selected processing month. Covered amount uses the certificate rate; only excess beyond the available certificate balance uses the normal rate.</p><div class="toolbar"><input id="ldcSearch" placeholder="Search Customer ID / PAN / E Code / Certificate"></div><div id="ldcCards"></div></div>`;
+ <div class="card"><div class="toolbar"><b>LDC Analysis — Certificate Driven</b><button id="ldcExport" class="primary">Export LDC Analysis</button><button id="ldcCommit">Commit Month Utilisation</button><span id="ldcCommitMsg" class="muted"></span></div><p class="muted">Only E-code backend records appear here. A valid certificate must match PAN + E-code and the selected processing month. Covered amount uses the certificate rate; only excess beyond the available certificate balance uses the normal rate.</p><div class="toolbar"><input id="ldcSearch" placeholder="Search Customer ID / PAN / E Code / Certificate"></div><div id="ldcCards"></div></div>`;
  const renderLdcCards=()=>{
   const q=(document.getElementById("ldcSearch")?.value||"").trim().toLowerCase();
   const filtered=q?ld.filter(g=>[g.pan,g.code,g.cert?.certificateNo||"",...g.rows.flat()].join(" ").toLowerCase().includes(q)):ld;
@@ -313,6 +322,7 @@ function render(){
  renderLdcCards();document.getElementById("ldcSearch").oninput=renderLdcCards;
  document.getElementById("lcAdd").onclick=()=>{const c={pan:normalizeIdentifier(document.getElementById("lcPan").value),certificateNo:document.getElementById("lcCert").value.trim(),eCode:document.getElementById("lcCode").value.trim().toUpperCase(),amount:Number(document.getElementById("lcAmount").value),rate:Number(document.getElementById("lcRate").value),normalRate:Number(document.getElementById("lcNormal").value||10),validFrom:document.getElementById("lcFrom").value,validTo:document.getElementById("lcTo").value,priorUtilised:Number(document.getElementById("lcPrior").value||0),remarks:document.getElementById("lcRemarks").value.trim()};if(!isNormalPAN(c.pan)||!c.certificateNo||!c.eCode.startsWith("E")||!(c.amount>=0)||!(c.rate>=0)||!c.validFrom||!c.validTo){document.getElementById("lcMsg").textContent="Enter valid PAN, certificate, E-code, amount, rate and validity dates.";return}state.ldcCertificates.push(c);saveLdcCertificates();render()};
  document.querySelectorAll("[data-delcert]").forEach(b=>b.onclick=()=>{state.ldcCertificates.splice(Number(b.dataset.delcert),1);saveLdcCertificates();render()});
+ document.getElementById("ldcCommit").onclick=()=>{const n=commitCurrentLdcMonth();document.getElementById("ldcCommitMsg").textContent=`Committed utilisation for ${n} certificate group(s). Future months will start from this used amount.`;render()};
  document.getElementById("ldcExport").onclick=()=>exportCSV("tds_ldc_certificate_analysis.csv",["PAN","E-code","Certificate No","Current Interest","Sanctioned Amount","Prior Utilised","Covered Amount","LDC Rate","Excess Amount","Normal Rate","Expected TDS","System TDS","Difference","Result"],ld.map(g=>[g.pan,g.code,g.cert?.certificateNo||"",g.interest,g.calc?.sanctioned||0,g.calc?.prior||0,g.calc?.covered||0,g.calc?.ldcRate||0,g.calc?.excess||0,g.calc?.normalRate||0,g.calc?.expectedTds||0,g.system,Math.abs(g.difference),g.status]));
  document.getElementById("upload").innerHTML=`<div class="card"><b>Monthly Backend File</b>
  <p class="muted">Upload the backend TXT/CSV directly. This version no longer assumes that the required five fields are the first five columns. It reads the header, auto-detects fields such as <b>cust_id</b>, <b>PAN</b>, <b>tax code / TDS code</b>, <b>INT_AMT</b> and <b>RECOMMENDED_TDS_AMT</b>, then shows a mapping screen when detection is uncertain. Pipe-delimited backend exports are supported.</p>
