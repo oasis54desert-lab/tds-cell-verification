@@ -103,7 +103,7 @@ const SAMPLE=[
 ];
 const LDC_CERTS_KEY="tds_v127_ldc_certificates";
 const state={month:"2026-08",batch:"SAMPLE-202608",file:"sample_backend_interest.txt",rules:structuredClone(DEFAULT_RULES),records:structuredClone(SAMPLE),loggedIn:false,query:"",review:loadJSON("tds_v12_review",{}),ldcCertificates:loadJSON(LDC_CERTS_KEY,[])};
-const uploadState={headers:[],rows:[],delimiter:"",fileName:""};
+const uploadState={headers:[],rows:[],delimiter:"",fileName:"",dateIndex:-1};
 
 function rule(c){const key=String(c??"").trim().toUpperCase();return state.rules.find(x=>x.code===key)}
 function expected(r){
@@ -144,6 +144,7 @@ function certificateFor(pan,code){
  const d=monthDate();
  return state.ldcCertificates.find(c=>normalizeIdentifier(c.pan)===normalizeIdentifier(pan)&&String(c.eCode||"").toUpperCase()===String(code||"").toUpperCase()&&(!parseDate(c.validFrom)||d>=parseDate(c.validFrom))&&(!parseDate(c.validTo)||d<=parseDate(c.validTo)));
 }
+function ldcPeriod(dateValue,cert){const d=parseDate(dateValue),from=parseDate(cert?.validFrom),to=parseDate(cert?.validTo);if(!d)return "UNKNOWN";if(from&&d<from)return "PRE";if(to&&d>to)return "POST";return "ACTIVE"}
 function calcCertificateLdc(interest,cert){
  const amt=Math.max(0,Number(interest)||0),sanctioned=Math.max(0,Number(cert?.amount)||0),prior=Math.max(Math.max(0,Number(cert?.priorUtilised)||0),committedUsage(cert));
  const available=Math.max(0,sanctioned-prior),covered=Math.min(amt,available),excess=Math.max(0,amt-covered);
@@ -161,8 +162,17 @@ function ldcCalc(){
  return Object.values(groups).map(g=>{
   const cert=certificateFor(g.pan,g.code);
   if(!cert)return {...g,cert:null,calc:null,difference:g.system,status:"REVIEW",reason:"No valid LDC certificate mapped for this PAN + E-code / month"};
-  const c=calcCertificateLdc(g.interest,cert),difference=g.system-c.expectedTds;
-  return {...g,cert,calc:c,difference,status:Math.abs(difference)<.005?"PASS":difference<0?"UNDER":"OVER",reason:"Certificate matched"};
+  const dated=g.rows.some(r=>r[5]);
+  if(!dated){const c=calcCertificateLdc(g.interest,cert),difference=g.system-c.expectedTds;return {...g,cert,calc:c,periods:null,difference,status:Math.abs(difference)<.005?"PASS":difference<0?"UNDER":"OVER",reason:"Certificate matched; no payment date supplied, so pre/post split unavailable"}}
+  const periods={PRE:{interest:0,system:0},ACTIVE:{interest:0,system:0},POST:{interest:0,system:0},UNKNOWN:{interest:0,system:0}};
+  g.rows.forEach(r=>{const p=ldcPeriod(r[5],cert);periods[p].interest+=Math.max(0,Number(r[3])||0);periods[p].system+=Math.max(0,Number(r[4])||0)});
+  const normalRate=Math.max(0,Number(cert.normalRate)||10);
+  const preTds=periods.PRE.interest*normalRate/100,postTds=periods.POST.interest*normalRate/100;
+  const active=calcCertificateLdc(periods.ACTIVE.interest,cert);
+  const expectedTds=preTds+active.expectedTds+postTds;
+  const c={...active,interest:g.interest,expectedTds,preInterest:periods.PRE.interest,preTds,activeInterest:periods.ACTIVE.interest,postInterest:periods.POST.interest,postTds,unknownInterest:periods.UNKNOWN.interest};
+  const difference=g.system-expectedTds,status=periods.UNKNOWN.interest>0?"REVIEW":Math.abs(difference)<.005?"PASS":difference<0?"UNDER":"OVER";
+  return {...g,cert,calc:c,periods,difference,status,reason:periods.UNKNOWN.interest>0?"Some LDC rows have no usable payment date":"Pre / Active / Post LDC split applied"};
  });
 }
 function money(x){return "₹"+Number(x||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -316,7 +326,7 @@ function render(){
   document.getElementById("ldcCards").innerHTML=filtered.map(g=>{
    if(!g.cert)return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)} · ${esc(g.code)}</div><div class="muted">${g.rows.length} Customer ID(s)</div></div><span class="pill under">REVIEW</span></div><div class="auditbox warnbox">${esc(g.reason)}</div></div>`;
    const c=g.calc,cls=g.status.toLowerCase();
-   return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)} · ${esc(g.code)}</div><div class="muted">Certificate ${esc(g.cert.certificateNo)} · valid ${esc(g.cert.validFrom)} to ${esc(g.cert.validTo)}</div></div><span class="pill ${cls}">${g.status}</span></div><div class="pan-summary"><div><span>Current Interest</span><strong>${money(g.interest)}</strong></div><div><span>Sanctioned Amount</span><strong>${money(c.sanctioned)}</strong></div><div><span>Prior Utilised</span><strong>${money(c.prior)}</strong></div><div><span>Available Before Month</span><strong>${money(c.available)}</strong></div><div><span>Covered @ ${c.ldcRate}%</span><strong>${money(c.covered)}</strong></div><div><span>Balance After Month</span><strong>${money(c.balance)}</strong></div><div><span>Excess @ ${c.normalRate}%</span><strong>${money(c.excess)}</strong></div><div><span>Expected TDS</span><strong>${money(c.expectedTds)}</strong></div><div><span>System TDS</span><strong>${money(g.system)}</strong></div></div><div class="auditbox ${cls==="pass"?"okbox":cls==="under"?"badbox":"warnbox"}">Difference: ${money(Math.abs(g.difference))} — ${g.status}</div><div class="table"><table><thead><tr><th>Customer ID</th><th>Interest</th><th>System TDS</th></tr></thead><tbody>${g.rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${money(r[3])}</td><td>${money(r[4])}</td></tr>`).join("")}</tbody></table></div></div>`;
+   return `<div class="pan-card"><div class="pan-head"><div><div class="pan-title">${esc(g.pan)} · ${esc(g.code)}</div><div class="muted">Certificate ${esc(g.cert.certificateNo)} · valid ${esc(g.cert.validFrom)} to ${esc(g.cert.validTo)}</div></div><span class="pill ${cls}">${g.status}</span></div><div class="pan-summary"><div><span>Current Interest</span><strong>${money(g.interest)}</strong></div><div><span>Sanctioned Amount</span><strong>${money(c.sanctioned)}</strong></div><div><span>Prior Utilised</span><strong>${money(c.prior)}</strong></div><div><span>Available Before Month</span><strong>${money(c.available)}</strong></div><div><span>Covered @ ${c.ldcRate}%</span><strong>${money(c.covered)}</strong></div><div><span>Balance After Month</span><strong>${money(c.balance)}</strong></div><div><span>Excess @ ${c.normalRate}%</span><strong>${money(c.excess)}</strong></div><div><span>Expected TDS</span><strong>${money(c.expectedTds)}</strong></div><div><span>System TDS</span><strong>${money(g.system)}</strong></div></div><div class="auditbox ${cls==="pass"?"okbox":cls==="under"?"badbox":"warnbox"}">Difference: ${money(Math.abs(g.difference))} — ${g.status}</div>${g.periods?`<div class="table"><table><thead><tr><th>LDC Stage</th><th>Interest</th><th>Expected TDS</th></tr></thead><tbody><tr><td><b>Pre-LDC</b></td><td>${money(c.preInterest)}</td><td>${money(c.preTds)}</td></tr><tr><td><b>Active LDC</b></td><td>${money(c.activeInterest)}</td><td>${money(c.ldcTds+c.excessTds)}</td></tr><tr><td><b>Post-LDC</b></td><td>${money(c.postInterest)}</td><td>${money(c.postTds)}</td></tr></tbody></table></div>`:`<p class="muted">Pre/Post split needs the optional LDC Payment / Interest Date column. Current monthly total is still assessed against the valid certificate.</p>`}<div class="table"><table><thead><tr><th>Customer ID</th><th>Interest</th><th>System TDS</th></tr></thead><tbody>${g.rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${money(r[3])}</td><td>${money(r[4])}</td></tr>`).join("")}</tbody></table></div></div>`;
   }).join("")||`<div class="card muted">No E-code records found.</div>`;
  };
  renderLdcCards();document.getElementById("ldcSearch").oninput=renderLdcCards;
@@ -459,7 +469,7 @@ function autoMapHeaders(headers){
    pan:headerIndex(headers,["pan","panvalue","panno","panid"]),
    code:headerIndex(headers,["taxcode","tdscode","tdstl","tdstbl","tdscodeid","tdstaxcode","tdscustid"]),
    interest:headerIndex(headers,["intamt","interestamount","interest","intamount"]),
-   system:headerIndex(headers,["recommendedtdsamt","systemtds","tdsamt","deductedtds","recommendedtds"])
+   system:headerIndex(headers,["recommendedtdsamt","systemtds","tdsamt","deductedtds","recommendedtds"]),\n   date:headerIndex(headers,["paymentdate","interestdate","valuedate","tdsdate","date"])
  };
 }
 function numberValue(v){
@@ -480,7 +490,7 @@ function showMapping(map){
  <label>PAN<select id="mapPan">${selectOptions(h,map.pan)}</select></label>
  <label>Tax Code<select id="mapCode">${selectOptions(h,map.code)}</select></label>
  <label>Interest Amount<select id="mapInterest">${selectOptions(h,map.interest)}</select></label>
- <label>System / Recommended TDS<select id="mapSystem">${selectOptions(h,map.system)}</select></label>
+ <label>System / Recommended TDS<select id="mapSystem">${selectOptions(h,map.system)}</select></label>\n <label>LDC Payment / Interest Date (optional)<select id="mapDate">${selectOptions(h,map.date??-1)}</select></label>
  </div>
  <div class="toolbar" style="margin-top:10px"><button class="primary" id="importMapped">Import Mapped Records</button></div>
  <p class="muted">Preview: ${uploadState.rows.length} data row(s) detected · ${h.length} column(s) · Header delimiter: ${uploadState.delimiter==="\\t"?"TAB":esc(uploadState.delimiter)}</p>
@@ -496,7 +506,7 @@ function importMappedFile(){
    interest:Number(document.getElementById("mapInterest").value),
    system:Number(document.getElementById("mapSystem").value)
  };
- if(Object.values(idx).some(x=>x<0)){msg.textContent="Please map all five required columns.";return}
+ if([idx.customer,idx.pan,idx.code,idx.interest,idx.system].some(x=>x<0)){msg.textContent="Please map all five required columns.";return}
  const rows=[];
  for(const p of uploadState.rows){
    const customer=String(p[idx.customer]??"").trim();
@@ -504,7 +514,7 @@ function importMappedFile(){
    const code=String(p[idx.code]??"").trim().toUpperCase();
    const interest=numberValue(p[idx.interest]), system=numberValue(p[idx.system]);
    if(!customer || !pan || !code || !Number.isFinite(interest) || !Number.isFinite(system)) continue;
-   rows.push([customer,pan,code,interest,system]);
+   rows.push([customer,pan,code,interest,system,idx.date>=0?String(p[idx.date]??"").trim():""]);
  }
  if(!rows.length){msg.textContent="No valid records were produced from the selected mapping. Check the five columns.";return}
  state.records=rows;
